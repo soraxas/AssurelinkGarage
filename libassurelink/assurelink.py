@@ -1,27 +1,20 @@
+"""Assurelink Craftsman Garage Opene library."""
+
+# pylint: disable=useless-super-delegation
+
 import requests
-import configparser
-
-from const import AssurelinkURL, AspNet
-
-# simple way to retrieve username and password
-
-config = configparser.ConfigParser()
-config.read('./config.ini')
-accountDict = config.options('AccountDetails')
-email = config.get('AccountDetails','email')
-password = config.get('AccountDetails','password')
-
-if (email=='' or password=='' or
-    email=='ACCOUNT_EMAIL' or password=='ACCOUNT_PASSWORD'):
-    print('Please configure the username and password in config.ini')
-    exit(1)
+from const import AssurelinkURL, AspNet, RequestDoorState
 
 
 class CraftsmanAccount:
     """Account Token for assurelink session"""
 
     def __init__(self, email, password):
-        # Set the variables for reuse later in renewing token.
+        """Create an Assurelink account Token
+
+        :param email: user email for login
+        :param password: user password for login
+        """
         self._email = email
         self._password = password
         self._logged = False
@@ -29,7 +22,8 @@ class CraftsmanAccount:
         self.login()
 
     def login(self):
-        # RESTful request for posting account details.
+        """RESTful request for posting account details."""
+
         post_data = {
             'Email'   : self._email,
             'Password': self._password
@@ -38,235 +32,150 @@ class CraftsmanAccount:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)'
         }
-        # Disallow redirects to intercept the returned cookies and validate response code.
         response = requests.post(AssurelinkURL.BASE.value, json=post_data,
                                  headers=headers, allow_redirects=False)
-
         # These three variabels indicates the success of login process.
         if (response.status_code != 302 or
-            AspNet.ASPNET_COOKIE.value not in response.cookies or
-            AspNet.ASPNET_SESSION_ID.value not in response.cookies):
+                AspNet.ASPNET_COOKIE.value not in response.cookies or
+                AspNet.ASPNET_SESSION_ID.value not in response.cookies):
             self._logged = False
-            raise ValueError("login failed")
         else:
             # Retrieve the needed AspNet cookies and session id.
-            self._aspnetCookie = response.cookies[AspNet.ASPNET_COOKIE.value]
-            self._aspnetSessionId = response.cookies[AspNet.ASPNET_SESSION_ID.value]
+            self._aspnet_cookie = response.cookies[AspNet.ASPNET_COOKIE.value]
+            self._aspnet_session_id = response.cookies[AspNet.ASPNET_SESSION_ID.value]
             self._logged = True
+        return self.logged
 
-    def renewToken(self):
+    def renew_token(self):
+        """Renew the cookies token."""
+
         self._logged = False
-        self.login()
+        return self.login()
 
-    def getCookieHeader(self):
+    def get_cookie_header(self):
+        """Return the formatted headers with the cookie and session ID."""
         header = {
             'Cookie' : '{0}={1};{2}={3}'.format(AspNet.ASPNET_COOKIE.value,
-                                                self.aspnetCookie,
+                                                self.aspnet_cookie,
                                                 AspNet.ASPNET_SESSION_ID.value,
-                                                self.aspnetSessionId)
+                                                self.aspnet_session_id)
         }
         return header
 
+    def get_devices(self):
+        """Method to return a list of devices associated to the account.
+
+        param account_token: account token of the account after login."""
+
+        if not self.logged:
+            raise AssurelinknNotLoggedException()
+
+        url = AssurelinkURL.BASE.value + AssurelinkURL.GET_ALL_DEVICES.value
+        headers = self.get_cookie_header()
+        payload = {
+            'brandName' : 'Craftsman'
+        }
+        responses = requests.get(url, headers=headers, params=payload)
+        openers = []
+        for response in responses.json():
+            openers.append(GarageOpener(response, self))
+        return openers
+
+    def __repr__(self):
+        return "CraftsmanAccount('" + self._email + "','" + self._password + "')"
+
     @property
     def logged(self):
+        """Indicates if account had successfully logged in."""
         return self._logged
 
     @property
-    def aspnetCookie(self):
-        return self._aspnetCookie
+    def aspnet_cookie(self):
+        """AspNet Cookie for account auth."""
+        return self._aspnet_cookie
 
     @property
-    def aspnetSessionId(self):
-        return  self._aspnetSessionId
+    def aspnet_session_id(self):
+        """AspNet Session ID for account auth."""
+        return  self._aspnet_session_id
 
 
-class garageOpener:
+class GarageOpener:
+    """Garage Opener object that controls each aspects of its status."""
 
     def __init__(self, openerStatus, accountToken):
-        self._accountToken = accountToken
+        self._account_token = accountToken
 
-        self._name                 = openerStatus['Name'] # "Garage Opener"
-        self._gatewayId            = openerStatus['GatewayId'] # 32734230
-        self._deviceId             = openerStatus['MyQDeviceId'] # 32734231
-        self._gatewayLocation      = openerStatus['Gateway'] # "Hornsby"
-        self._deviceTypeId         = openerStatus['DeviceTypeId'] # 17
-        self._imagesource          = openerStatus['Imagesource'] # "icon_door_2.png"
-        self._statesince           = openerStatus['Statesince'] # 1499322848545
-        self._displayStatesince    = openerStatus['DisplayStatesince'] # "Closed for 7 minutes"
-        self._lastUpdatedDateTime  = openerStatus['LastUpdatedDateTime'] # "2017-07-06T06:34:08.5450000Z"
-        self._state                = openerStatus['State'] # "2"
-        self._monitorOnly          = openerStatus['MonitorOnly'] # false
-        self._lowBattery           = openerStatus['LowBattery'] # false
-        self._sensorError          = openerStatus['SensorError'] # false
-        self._openError            = openerStatus['OpenError'] # false
-        self._closeError           = openerStatus['CloseError'] # false
-        self._disableControl       = openerStatus['DisableControl'] # false
-        self._stateName            = openerStatus['StateName'] # "Closed"
-        self._toggleAttributeName  = openerStatus['ToggleAttributeName'] # "desireddoorstate"
-        self._toggleAttributeValue = openerStatus['ToggleAttributeValue'] # "1"}]
-        self._error                = openerStatus['Error'] # false
-        self._errorStatus          = openerStatus['ErrorStatus'] # null
-        self._errorMessage         = openerStatus['ErrorMessage'] # null
-        # self._name                 : openerStatus['Name'] # "Garage Opener"
-        # self._gatewayId            : openerStatus['GatewayId'] # 32734230
-        # self._deviceId             : openerStatus['MyQDeviceId'] # 32734231
-        # self._gatewayLocation      : openerStatus['Gateway'] # "Hornsby"
-        # self._deviceTypeId         : openerStatus['DeviceTypeId'] # 17
-        # self._imagesource          : openerStatus['Imagesource'] # "icon_door_2.png"
-        # self._statesince           : openerStatus['Statesince'] # 1499322848545
-        # self._displayStatesince    : openerStatus['DisplayStatesince'] # "Closed for 7 minutes"
-        # self._lastUpdatedDateTime  : openerStatus['LastUpdatedDateTime'] # "2017-07-06T06:34:08.5450000Z"
-        # self._state                : openerStatus['State'] # "2"
-        # self._monitorOnly          : openerStatus['MonitorOnly'] # false
-        # self._lowBattery           : openerStatus['LowBattery'] # false
-        # self._sensorError          : openerStatus['SensorError'] # false
-        # self._openError            : openerStatus['OpenError'] # false
-        # self._closeError           : openerStatus['CloseError'] # false
-        # self._disableControl       : openerStatus['DisableControl'] # false
-        # self._stateName            : openerStatus['StateName'] # "Closed"
-        # self._toggleAttributeName  : openerStatus['ToggleAttributeName'] # "desireddoorstate"
-        # self._toggleAttributeValue : openerStatus['ToggleAttributeValue'] # "1"}]
-        # self._error                : openerStatus['Error'] # false
-        # self._errorStatus          : openerStatus['ErrorStatus'] # null
-        # self._errorMessage         : openerStatus['ErrorMessage'] # null
+        self._name = openerStatus['Name']
+        self._gateway_location = openerStatus['Gateway']
+        self._device_id = openerStatus['MyQDeviceId']
+        self._gateway_id = openerStatus['GatewayId']
 
-    def getStatus(self):
+    def get_status(self):
+        """Return current status as reported from REST request."""
+
         url = AssurelinkURL.BASE.value + AssurelinkURL.GET_DEVICE.value
-        headers = self.accountToken.getCookieHeader()
+        headers = self._account_token.get_cookie_header()
         payload = {
             'brandName'    : 'Craftsman',
-            'SerialNumber' : self.deviceId
+            'SerialNumber' : self.device_id
         }
         responses = requests.post(url, headers=headers, params=payload)
         return responses
 
+    def open_garage(self):
+        """Open the garage door."""
+        return self._garage_control(RequestDoorState.OPEN.value)
+
+    def close_garage(self):
+        """Close the garage door."""
+        return self._garage_control(RequestDoorState.CLOSE.value)
+
+    def _garage_control(self, desire_door_state):
+        """The main method to send REST request to control the garage door.
+
+        param desire_door_state: The int that indicates which position the door
+                                 should be in."""
+        url = AssurelinkURL.BASE.value + AssurelinkURL.GARAGE_CONTROL.value
+        headers = self._account_token.get_cookie_header()
+        payload = {
+            'SerialNumber'   : self.device_id,
+            'attributename'  : 'desireddoorstate',
+            'attributevalue' : desire_door_state
+        }
+        responses = requests.post(url, headers=headers, params=payload)
+        return responses
+
+    def __repr__(self):
+        key = ['Name', 'Gateway', 'MyQDeviceId', 'GatewayId']
+        val = map(str, [self.name, self.location, self.device_id, self.gateway_id])
+        json = "','".join(["':'".join(pair) for pair in list(zip(key, val))])
+        json = "{'" + json + "'}"
+        return 'GarageOpener(' + json + ',' + self._account_token.__repr__() + ")"
+
     @property
     def name(self):
+        """Name of the garage door."""
         return self._name
 
     @property
     def location(self):
-        return self._gatewayLocation
+        """Location of the garage door."""
+        return self._gateway_location
 
     @property
-    def deviceId(self):
-        return  self._deviceId
+    def device_id(self):
+        """Garage door ID."""
+        return  self._device_id
 
     @property
-    def accountToken(self):
-        return  self._accountToken
+    def gateway_id(self):
+        """The internew gateway ID."""
+        return  self._gateway_id
 
+class AssurelinknNotLoggedException(Exception):
+    """Not logged to Assurelink Web Services Exception."""
 
-
-def getDevices(accountToken):
-    url = AssurelinkURL.BASE.value + AssurelinkURL.GET_ALL_DEVICES.value
-    headers = accountToken.getCookieHeader()
-    payload = {
-        'brandName' : 'Craftsman'
-    }
-    responses = requests.get(url, headers=headers, params=payload)
-    openers = []
-    for r in responses.json():
-        openers.append(garageOpener(r, accountToken))
-    return openers
-
-
-
-
-
-acc = CraftsmanAccount(email, password)
-print(acc)
-
-openers = getDevices(acc)
-
-print(openers)
-
-for device in openers:
-    print('----')
-    print(device.name)
-    print(device.location)
-    print(device.deviceId)
-    print(device.getStatus())
-    print(device.getStatus().text)
-
-
-exit()
-
-
-
-
-
-
-print(response.cookies[ASPNET_COOKIE])
-print(response.cookies[ASPNET_SESSION_ID])
-
-aspnetCookie = response.cookies[ASPNET_COOKIE]
-aspnetSessionId = response.cookies[ASPNET_SESSION_ID]
-
-headers = {
-    'Cookie' : '{0}={1};{2}={3}'.format(ASPNET_COOKIE, aspnetCookie, ASPNET_SESSION_ID, aspnetSessionId)
-}
-
-print('=======')
-print(headers)
-print('=======')
-
-
-response = requests.get(url, headers=headers, allow_redirects=True)
-#
-print(response)
-print('--------')
-print(response.headers)
-print('--------')
-print(response.cookies)
-print('--------')
-print(response.text)
-# import urllib
-# import urllib2
-# # import json
-# import re
-# import ssl
-#
-#
-# # monkey patching..............
-# ssl._create_default_https_context = ssl._create_unverified_context
-#
-# # global var for storing cookies
-# global cookies
-#
-# # custom catcher for headers
-# class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
-#     def http_error_302(self, req, fp, code, msg, headers):
-#         global cookies
-#         cookies = headers['set-cookie']
-#         return urllib2.HTTPRedirectHandler.http_error_302(self, req, fp, code, msg, headers)
-#     http_error_301 = http_error_303 = http_error_307 = http_error_302
-# cookieprocessor = urllib2.HTTPCookieProcessor()
-# opener = urllib2.build_opener(MyHTTPRedirectHandler, cookieprocessor)
-# urllib2.install_opener(opener)
-#
-# # user variables
-# post_data = {
-#     'Email': USER_EMAIL,
-#     'Password': USER_PASSWD
-#     }
-# data = urllib.urlencode(post_data)
-# headers = {
-#     # 'Content-Type': "application/x-www-form-urlencoded",
-#     'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)'
-# }
-# url = "https://assurelink.craftsman.com/"
-# # request
-# req = urllib2.Request(url, data, headers)
-# response = urllib2.urlopen(req)
-# # response = urllib2.urlopen(url + '?' + data +)
-#
-# # retrieve required cookies headers
-# match = re.search('(ASP.NET_SessionId=).+?;', cookies)
-# sessionId = match.group(0)
-#
-# match = re.search('(.AspNet.ApplicationCookie=).+?;', cookies)
-# appCookie = match.group(0)
-#
-# print(sessionId)
-# print(appCookie)
+    def __init__(self):
+        """Assurelink not logged Exception."""
+        super(AssurelinknNotLoggedException, self).__init__()
