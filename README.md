@@ -21,7 +21,7 @@ The following feature are supported:
 ## Quick start
 
 ```python
-from libassurelink import assurelink
+from libassurelink.assurelink import CraftsmanAccount
 
 account = CraftsmanAccount(EMAIL, PASSWORD)
 

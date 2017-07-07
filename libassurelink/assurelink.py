@@ -3,7 +3,7 @@
 # pylint: disable=useless-super-delegation
 
 import requests
-from const import AssurelinkURL, AspNet, RequestDoorState
+from .const import AssurelinkURL, AspNet, RequestDoorState
 
 
 class CraftsmanAccount:
